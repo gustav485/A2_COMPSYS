@@ -67,6 +67,7 @@ void *Worker(void *arg) {
     fhistogram(path);
     free(path);
   }
+  free(arg);
   return NULL;
 }
 
@@ -105,9 +106,8 @@ int main(int argc, char * const *argv) {
   }
   pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
   for (int i = 0; i < num_threads; i++) {
-    void **args = malloc( 2* sizeof(void*));
+    void **args = malloc(sizeof(void*));
     args[0] = &q;
-    
     pthread_create(&threads[i], NULL, Worker, args);
   }
   // FTS_LOGICAL = follow symbolic links
