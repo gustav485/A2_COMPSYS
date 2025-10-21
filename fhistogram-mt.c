@@ -21,6 +21,56 @@ pthread_mutex_t stdout_mutex = PTHREAD_MUTEX_INITIALIZER;
 #include <err.h>
 
 #include "histogram.h"
+int global_histogram[8] = { 0 };
+
+int fhistogram(char const *path) {
+  FILE *f = fopen(path, "r");
+
+  int local_histogram[8] = { 0 };
+
+  if (f == NULL) {
+    fflush(stdout);
+    assert(pthread_mutex_lock(&stdout_mutex) == 0);
+    warn("failed to open %s", path);
+    assert(pthread_mutex_unlock(&stdout_mutex) == 0);
+    return -1;
+  }
+
+  int i = 0;
+
+  char c;
+  while (fread(&c, sizeof(c), 1, f) == 1) {
+    i++;
+    assert(pthread_mutex_lock(&stdout_mutex) == 0);
+    update_histogram(local_histogram, c);
+    assert(pthread_mutex_unlock(&stdout_mutex) == 0);
+    if ((i % 100000) == 0) {
+      assert(pthread_mutex_lock(&stdout_mutex) == 0);
+      merge_histogram(local_histogram, global_histogram);
+      print_histogram(global_histogram);
+      assert(pthread_mutex_unlock(&stdout_mutex) == 0);
+    }
+  }
+
+  fclose(f);
+  assert(pthread_mutex_lock(&stdout_mutex) == 0);
+  merge_histogram(local_histogram, global_histogram);
+  print_histogram(global_histogram);
+  assert(pthread_mutex_unlock(&stdout_mutex) == 0);
+
+  return 0;
+}
+
+void *Worker(void *arg) {
+  struct job_queue *q = ((void **)arg)[0];
+  void *data;
+  while (job_queue_pop(q, &data) == 0) {
+    char *path = data;
+    fhistogram(path);
+    free(path);
+  }
+  return NULL;
+}
 
 int main(int argc, char * const *argv) {
   if (argc < 2) {
@@ -30,6 +80,9 @@ int main(int argc, char * const *argv) {
 
   int num_threads = 1;
   char * const *paths = &argv[1];
+
+  struct job_queue q;
+  int capacity = num_threads * 2;
 
   if (argc > 3 && strcmp(argv[1], "-n") == 0) {
     // Since atoi() simply returns zero on syntax errors, we cannot
@@ -49,8 +102,16 @@ int main(int argc, char * const *argv) {
     paths = &argv[1];
   }
 
-  assert(0); // Initialise the job queue and some worker threads here.
-
+  if (job_queue_init(&q, capacity) != 0) {
+    err(1, "Failed to initialize job queue.\n");
+  }
+  pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
+  for (int i = 0; i < num_threads; i++) {
+    void **args = malloc( 2* sizeof(void*));
+    args[0] = &q;
+    
+    pthread_create(&threads[i], NULL, Worker, args);
+  }
   // FTS_LOGICAL = follow symbolic links
   // FTS_NOCHDIR = do not change the working directory of the process
   //
@@ -70,7 +131,7 @@ int main(int argc, char * const *argv) {
     case FTS_D:
       break;
     case FTS_F:
-      assert(0); // Process the file p->fts_path, somehow.
+      job_queue_push(&q, strdup(p->fts_path));
       break;
     default:
       break;
@@ -78,9 +139,12 @@ int main(int argc, char * const *argv) {
   }
 
   fts_close(ftsp);
-
-  assert(0); // Shut down the job queue and the worker threads here.
-
+  for (int i = 0; i < num_threads; i++) {
+    pthread_join(threads[i], NULL);
+  }
+  if (job_queue_destroy(&q) != 0) {
+    err(1, "Failde to destroy job queue");
+  } 
   move_lines(9);
 
   return 0;
