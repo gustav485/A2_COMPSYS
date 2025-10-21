@@ -41,9 +41,7 @@ int fhistogram(char const *path) {
   char c;
   while (fread(&c, sizeof(c), 1, f) == 1) {
     i++;
-    assert(pthread_mutex_lock(&stdout_mutex) == 0);
     update_histogram(local_histogram, c);
-    assert(pthread_mutex_unlock(&stdout_mutex) == 0);
     if ((i % 100000) == 0) {
       assert(pthread_mutex_lock(&stdout_mutex) == 0);
       merge_histogram(local_histogram, global_histogram);
@@ -146,6 +144,5 @@ int main(int argc, char * const *argv) {
     err(1, "Failde to destroy job queue");
   } 
   move_lines(9);
-
   return 0;
 }
