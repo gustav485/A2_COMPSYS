@@ -19,10 +19,14 @@
 
 #include "job_queue.h"
 
+pthread_mutex_t stdout_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 int fauxgrep_file(char const *needle, char const *path) {
   FILE *f = fopen(path, "r");
   if (f == NULL) {
+    assert(pthread_mutex_lock(&stdout_mutex) == 0);
     warn("failed to open %s", path);
+    assert(pthread_mutex_unlock(&stdout_mutex) == 0);
     return -1;
   }
   char *line = NULL;
@@ -30,7 +34,9 @@ int fauxgrep_file(char const *needle, char const *path) {
   int lineno = 1;
   while (getline(&line, &linelen, f) != -1) {
     if (strstr(line, needle) != NULL) {
+      assert(pthread_mutex_lock(&stdout_mutex) == 0);
       printf("%s:%d: %s", path, lineno, line);
+      assert(pthread_mutex_unlock(&stdout_mutex) == 0);
     }
     lineno++;
   }
