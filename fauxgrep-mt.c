@@ -19,16 +19,51 @@
 
 #include "job_queue.h"
 
+int fauxgrep_file(char const *needle, char const *path) {
+  FILE *f = fopen(path, "r");
+  if (f == NULL) {
+    warn("failed to open %s", path);
+    return -1;
+  }
+  char *line = NULL;
+  size_t linelen = 0;
+  int lineno = 1;
+  while (getline(&line, &linelen, f) != -1) {
+    if (strstr(line, needle) != NULL) {
+      printf("%s:%d: %s", path, lineno, line);
+    }
+    lineno++;
+  }
+  free(line);
+  fclose(f);
+  return 0;
+}
+
+void *worker(void *arg) {
+  struct job_queue *q = ((void **)arg)[0];
+  char const *needle = ((void **)arg)[1];
+  void *data;
+
+  while (job_queue_pop(q, &data) == 0) {
+    char *path = data;
+    fauxgrep_file(needle, path);
+    free(path);
+  }
+  return NULL;
+}
+
 int main(int argc, char * const *argv) {
   if (argc < 2) {
     err(1, "usage: [-n INT] STRING paths...");
     exit(1);
   }
 
-  int num_threads = 1;
+  int num_threads = 4;
   char const *needle = argv[1];
   char * const *paths = &argv[2];
 
+  struct job_queue q;
+  int capacity = num_threads * 2;
 
   if (argc > 3 && strcmp(argv[1], "-n") == 0) {
     // Since atoi() simply returns zero on syntax errors, we cannot
@@ -50,8 +85,17 @@ int main(int argc, char * const *argv) {
     needle = argv[1];
     paths = &argv[2];
   }
-
-  assert(0); // Initialise the job queue and some worker threads here.
+  
+  if (job_queue_init(&q, capacity) != 0) {
+    err(1, "Failed to initialize job queue.\n");
+  } 
+  pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
+  for (int i = 0; i < num_threads; i++) {
+    void **args = malloc(2 * sizeof(void*));
+    args[0] = &q;
+    args[1] = (void*)needle;
+    pthread_create(&threads[i], NULL, worker, args);
+  }
 
   // FTS_LOGICAL = follow symbolic links
   // FTS_NOCHDIR = do not change the working directory of the process
@@ -72,7 +116,7 @@ int main(int argc, char * const *argv) {
     case FTS_D:
       break;
     case FTS_F:
-      assert(0); // Process the file p->fts_path, somehow.
+      job_queue_push(&q, strdup(p->fts_path));
       break;
     default:
       break;
@@ -80,8 +124,12 @@ int main(int argc, char * const *argv) {
   }
 
   fts_close(ftsp);
-
-  assert(0); // Shut down the job queue and the worker threads here.
-
+  for (int i = 0; i < num_threads; i++) {
+    pthread_join(threads[i], NULL);
+  }
+  if (job_queue_destroy(&q) != 0) {
+    err(1, "Failde to destroy job queue");
+  } 
+  free(threads);
   return 0;
 }
