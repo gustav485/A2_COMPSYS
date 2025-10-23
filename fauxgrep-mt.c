@@ -14,7 +14,6 @@
 // err.h contains various nonstandard BSD extensions, but they are
 // very handy.
 #include <err.h>
-
 #include <pthread.h>
 
 #include "job_queue.h"
@@ -29,6 +28,7 @@ int fauxgrep_file(char const *needle, char const *path) {
     assert(pthread_mutex_unlock(&stdout_mutex) == 0);
     return -1;
   }
+
   char *line = NULL;
   size_t linelen = 0;
   int lineno = 1;
@@ -48,12 +48,15 @@ int fauxgrep_file(char const *needle, char const *path) {
 void *worker(void *arg) {
   struct job_queue *q = ((void **)arg)[0];
   char const *needle = ((void **)arg)[1];
-  void *data;
+  void **args = arg;
+  free(args);
 
+  void *data;
   while (job_queue_pop(q, &data) == 0) {
-    char *path = data;
-    fauxgrep_file(needle, path);
-    free(path);
+    if (data == NULL) break;
+      char *path = data;
+      fauxgrep_file(needle, path);
+      free(path);
   }
   return NULL;
 }
@@ -64,7 +67,7 @@ int main(int argc, char * const *argv) {
     exit(1);
   }
 
-  int num_threads = 4;
+  int num_threads = 1;
   char const *needle = argv[1];
   char * const *paths = &argv[2];
 
@@ -72,52 +75,50 @@ int main(int argc, char * const *argv) {
   int capacity = num_threads * 2;
 
   if (argc > 3 && strcmp(argv[1], "-n") == 0) {
-    // Since atoi() simply returns zero on syntax errors, we cannot
-    // distinguish between the user entering a zero, or some
-    // non-numeric garbage.  In fact, we cannot even tell whether the
-    // given option is suffixed by garbage, i.e. '123foo' returns
-    // '123'.  A more robust solution would use strtol(), but its
-    // interface is more complicated, so here we are.
+  // Since atoi() simply returns zero on syntax errors, we cannot
+  // distinguish between the user entering a zero, or some
+  // non-numeric garbage.  In fact, we cannot even tell whether the
+  // given option is suffixed by garbage, i.e. '123foo' returns
+  // '123'.  A more robust solution would use strtol(), but its
+  // interface is more complicated, so here we are.
     num_threads = atoi(argv[2]);
 
     if (num_threads < 1) {
       err(1, "invalid thread count: %s", argv[2]);
     }
+      needle = argv[3];
+      paths = &argv[4];
+    } else {
+      needle = argv[1];
+      paths = &argv[2];
+    }
 
-    needle = argv[3];
-    paths = &argv[4];
 
-  } else {
-    needle = argv[1];
-    paths = &argv[2];
-  }
-  
-  if (job_queue_init(&q, capacity) != 0) {
-    err(1, "Failed to initialize job queue.\n");
-  } 
-  pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
-  for (int i = 0; i < num_threads; i++) {
-    void **args = malloc(2 * sizeof(void*));
-    args[0] = &q;
-    args[1] = (void*)needle;
-    pthread_create(&threads[i], NULL, worker, args);
-  }
+    if (job_queue_init(&q, capacity) != 0) {
+      err(1, "Failed to initialize job queue.\n");
+    }
 
+    pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
+    for (int i = 0; i < num_threads; i++) {
+      void **args = malloc(2 * sizeof(void*));
+      args[0] = &q;
+      args[1] = (void*)needle;
+      pthread_create(&threads[i], NULL, worker, args);
+    }
   // FTS_LOGICAL = follow symbolic links
   // FTS_NOCHDIR = do not change the working directory of the process
   //
   // (These are not particularly important distinctions for our simple
   // uses.)
-  int fts_options = FTS_LOGICAL | FTS_NOCHDIR;
+    int fts_options = FTS_LOGICAL | FTS_NOCHDIR;
 
-  FTS *ftsp;
-  if ((ftsp = fts_open(paths, fts_options, NULL)) == NULL) {
+    FTS *ftsp;
+    if ((ftsp = fts_open(paths, fts_options, NULL)) == NULL) {
     err(1, "fts_open() failed");
     return -1;
-  }
-
-  FTSENT *p;
-  while ((p = fts_read(ftsp)) != NULL) {
+    }
+    FTSENT *p;
+    while ((p = fts_read(ftsp)) != NULL) {
     switch (p->fts_info) {
     case FTS_D:
       break;
@@ -130,12 +131,19 @@ int main(int argc, char * const *argv) {
   }
 
   fts_close(ftsp);
+
+  for (int i = 0; i < num_threads; i++) {
+    job_queue_push(&q, NULL);
+  }
+
   for (int i = 0; i < num_threads; i++) {
     pthread_join(threads[i], NULL);
   }
+
   if (job_queue_destroy(&q) != 0) {
-    err(1, "Failde to destroy job queue");
-  } 
+    err(1, "Failed to destroy job queue");
+  }
+
   free(threads);
   return 0;
 }

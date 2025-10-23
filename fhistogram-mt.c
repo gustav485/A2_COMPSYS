@@ -14,13 +14,16 @@
 
 #include "job_queue.h"
 
-pthread_mutex_t stdout_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 // err.h contains various nonstandard BSD extensions, but they are
 // very handy.
 #include <err.h>
 
 #include "histogram.h"
+
+pthread_mutex_t stdout_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 int global_histogram[8] = { 0 };
 
 int fhistogram(char const *path) {
@@ -63,6 +66,7 @@ void *Worker(void *arg) {
   struct job_queue *q = ((void **)arg)[0];
   void *data;
   while (job_queue_pop(q, &data) == 0) {
+    if (data == NULL) break;
     char *path = data;
     fhistogram(path);
     free(path);
@@ -71,9 +75,11 @@ void *Worker(void *arg) {
   return NULL;
 }
 
+
+
 int main(int argc, char * const *argv) {
   if (argc < 2) {
-    err(1, "usage: paths...");
+    err(1, "usage: [-n INT] paths...");
     exit(1);
   }
 
@@ -137,6 +143,9 @@ int main(int argc, char * const *argv) {
   }
 
   fts_close(ftsp);
+  for (int i = 0; i < num_threads; i++) {
+        job_queue_push(&q, NULL);
+    }
   for (int i = 0; i < num_threads; i++) {
     pthread_join(threads[i], NULL);
   }
