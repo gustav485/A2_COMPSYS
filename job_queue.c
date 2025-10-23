@@ -19,7 +19,6 @@ int job_queue_init(struct job_queue *job_queue, int capacity) {
   job_queue->destroyed = 0;
   pthread_cond_init(&job_queue->not_empty, NULL);
   pthread_cond_init(&job_queue->not_full, NULL);
-  pthread_mutex_init(&job_queue->mutex, NULL);
 
   if (pthread_mutex_init(&job_queue->mutex, NULL) != 0) {
     free(job_queue->jobs);
@@ -32,9 +31,9 @@ int job_queue_init(struct job_queue *job_queue, int capacity) {
 int job_queue_destroy(struct job_queue *job_queue) {
   pthread_mutex_lock(&job_queue->mutex);
   job_queue->destroyed = 1;
-      while (job_queue->count > 0) {
-          pthread_cond_wait(&job_queue->not_full, &job_queue->mutex);
-      } 
+  while (job_queue->count > 0) {
+      pthread_cond_wait(&job_queue->not_full, &job_queue->mutex);
+  } 
 
   pthread_cond_broadcast(&job_queue->not_empty);
   pthread_mutex_unlock(&job_queue->mutex);
@@ -51,7 +50,10 @@ int job_queue_push(struct job_queue *job_queue, void *data) {
   while (job_queue->count == job_queue->capacity && job_queue-> destroyed != 1){
     pthread_cond_wait(&job_queue->not_full, &job_queue->mutex);
   }
-
+  if (job_queue->destroyed) {
+    pthread_mutex_unlock(&job_queue->mutex);
+    return -1;
+  }
   job_queue->jobs[job_queue->rear] = data;
   job_queue->rear = (job_queue->rear + 1) % job_queue->capacity;
   job_queue->count++;
@@ -64,10 +66,12 @@ int job_queue_push(struct job_queue *job_queue, void *data) {
 
 int job_queue_pop(struct job_queue *job_queue, void **data) {
   pthread_mutex_lock(&job_queue->mutex);
+
   while (job_queue->count == 0 && job_queue->destroyed != 1){
     pthread_cond_wait(&job_queue->not_empty, &job_queue->mutex);
   }
-  if (job_queue->destroyed){
+  
+  if (job_queue->count == 0 && job_queue->destroyed){
     pthread_mutex_unlock(&job_queue->mutex);
     return -1;
   }
