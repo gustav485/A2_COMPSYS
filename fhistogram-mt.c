@@ -149,8 +149,9 @@ int main(int argc, char * const *argv) {
   for (int i = 0; i < num_threads; i++) {
     pthread_join(threads[i], NULL);
   }
+  free(threads);
   if (job_queue_destroy(&q) != 0) {
-    err(1, "Failde to destroy job queue");
+    err(1, "Failed to destroy job queue");
   } 
   move_lines(9);
   return 0;
