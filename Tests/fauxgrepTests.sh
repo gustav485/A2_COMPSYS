@@ -25,7 +25,7 @@ echo -e "$TEST_DIR/file1.txt:3: needle here\n$TEST_DIR/file2.txt:2: needle appea
 echo "Creating large test file for performance tests..."
 for i in {1..3}; do
     FILE="$TEST_DIR/large_file$i.txt"
-    for j in {1..100000}; do
+    for j in {1..1000000}; do
         if (( j % 2500 == 0 )); then
             echo "needle at line $j" >> "$FILE"
         else
